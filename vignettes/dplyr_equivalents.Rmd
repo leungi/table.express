@@ -1,0 +1,309 @@
+---
+title: "Translating common dplyr verbs to data.table"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Using table.express}
+  %\VignetteEngine{knitr::rmarkdown_notangle}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+library("table.express")
+library("data.table")
+library("dplyr")
+
+# knitr defaults
+knitr::opts_chunk$set(comment = "#>")
+
+options("max.print" = 10L)
+options("datatable.print.nrows" = 4L)
+options("datatable.print.topn" = 2L)
+```
+
+This article covers more of `dplyr` verbs not included in the *Get started* vignette, specifically:
+
+- `select_*`
+- `mutate_*`
+- `filter_*`
+- `summarise_*`
+
+The examples here use `iris` data.
+
+Note that the examples were run with `.by_ref = FALSE`, which will disable assignment by reference (default) when performing `data.table` operations. This is purely for ease of demonstration; in reality, the default `.by_ref = TRUE` is recommended to retain `data.table` speed.
+
+```{r iris}
+data("iris")
+
+DF <- iris %T>%
+  print
+
+DT <- iris %>%
+  as.data.table %T>%
+  print
+```
+
+## `select_*`
+
+### `select_if`
+
+There is no direct translation, so we use a trick, leveraging `data.table` syntax - drop unwanted columns by assigning `NULL` to them.
+
+Hence, instead of selecting columns of interest (`numeric`), we select unwanted columns (not `numeric`) and assing `NULL` to them.
+
+```{r select_if}
+DF %>% 
+  select_if(is.numeric)
+
+DT %>%
+  start_expr() %>% 
+  mutate_sd(NULL, .SDcols = !is.numeric(.COL)) %>%
+  end_expr(.by_ref = FALSE) %>% {
+    invisible(print(.))
+  }
+```
+
+The above applies when trying to de-select columns as well.
+
+```{r de-select}
+DF %>% 
+  select(-Species)
+
+DT %>%
+  start_expr() %>% 
+  mutate_sd(NULL, .SDcols = 'Species') %>%
+  end_expr(.by_ref = FALSE) %>% {
+    invisible(print(.))
+  }
+```
+
+### `select_at` and `select_all`
+
+These verbs are typically used in conjuction to renaming columns; there are no translations currently in `table.express`.
+
+Users however may include this downstream of `table.express` call.
+
+```{r select_at}
+DF %>% 
+  select_at(vars(contains('Petal')), tolower)
+
+DT %>%
+  start_expr() %>% 
+  # drop columns that doesn't start with 'Petal'
+  mutate_sd(NULL, .SDcols = matches('^[^Petal]')) %>%
+  end_expr(.by_ref = FALSE) %>% 
+  rename_all(tolower) %>% {
+    invisible(print(.))
+  }
+
+```
+
+## `mutate_*`
+
+### `mutate_if`
+
+```{r mutate_if}
+DF %>% 
+  mutate_if(is.numeric, sum)
+
+DT %>%
+  start_expr() %>% 
+  mutate_sd(sum, .SDcols = is.numeric(.COL)) %>%
+  end_expr(.by_ref = FALSE) %>% {
+    invisible(print(.))
+  }
+```
+
+### `mutate_at`
+
+```{r mutate_at}
+DF %>% 
+  mutate_at(vars(contains('Petal')), sum)
+
+DT %>%
+  start_expr() %>% 
+  mutate_sd(sum, .SDcols = contains('Petal')) %>%
+  end_expr(.by_ref = FALSE) %>% {
+    invisible(print(.))
+  }
+```
+
+### `mutate_all`
+
+```{r mutate_all}
+DF %>% 
+  mutate_all(as.character)
+
+DT %>%
+  start_expr() %>% 
+  mutate_sd(as.character, .SDcols = everything()) %>%
+  end_expr(.by_ref = FALSE) %>% {
+    invisible(print(.))
+  }
+```
+
+Note that `dplyr` offers the ability to rename mutated columns in the `mutate_*` call; this is currently under development in `table.express` (please refer to [GitHub Issue #12](https://github.com/asardaes/table.express/issues/12){target="blank"}
+
+## `filter_*`
+
+### `filter_if` {#filter_if}
+
+`filter_if` with `all_vars` (i.e., all columns of interest meet the criteria).
+
+```{r filter_if-all}
+DF %>% 
+  filter_if(is.numeric, all_vars(. > 1.5))
+
+DT %>%
+  start_expr() %>% 
+  filter_sd(.SDcols = is.numeric(.COL), .COL > 1.5) %>%
+  end_expr(.by_ref = FALSE) %>% {
+    invisible(print(.))
+  }
+```
+
+`filter_if` with `any_vars` (i.e., any columns of interest meet the criteria). 
+
+```{r filter_if-any}
+DF %>% 
+  filter_if(is.numeric, any_vars(. > 1.5))
+
+DT %>%
+  start_expr() %>% 
+  filter_sd(.SDcols = is.numeric(.COL), .COL > 1.5, .collapse = '|') %>%
+  end_expr(.by_ref = FALSE) %>% {
+    invisible(print(.))
+  }
+```
+
+### `filter_at`
+
+`filter_at` with `all_vars` (i.e., all columns of interest meet the criteria).
+
+```{r filter_at}
+cols <- c("Sepal.Length", "Petal.Length")
+
+DF %>% 
+  filter_at(vars(one_of(cols)), all_vars(. > 2))
+
+DT %>%
+  start_expr() %>% 
+  filter_sd(.SDcols = one_of(cols), .COL > 2) %>%
+  end_expr(.by_ref = FALSE) %>% {
+    invisible(print(.))
+  }
+```
+
+`filter_at` with `any_vars` (i.e., any columns of interest meet the criteria) may be done in a similar manner as shown in [filter_if](#filter_if).
+
+### `filter_all`
+
+```{r filter_all}
+DF %>% 
+  filter_all(any_vars(. == 'setosa'))
+
+DT %>%
+  start_expr() %>% 
+  filter_sd(.SDcols = everything(), .COL == 'setosa', .collapse = '|') %>%
+  end_expr(.by_ref = FALSE) %>% {
+    invisible(print(.))
+  }
+```
+
+## `summarise_*`
+
+`summarise` is implemented in `table.express` via a combination of `transmute` and `group_by`.
+
+### `summarise_if`
+
+```{r summarise-if}
+DF %>% 
+  group_by(Species) %>% 
+  summarise_if(is.numeric, mean)
+
+# example 2: explictly declaring .SDcols
+DT %>%
+  start_expr() %>% 
+  group_by(Species) %>% 
+  transmute_sd(.SDcols = is.numeric(.COL), mean) %>%
+  end_expr(.by_ref = FALSE) %>% {
+    invisible(print(.))
+  }
+```
+
+### `summarise_at`
+
+```{r summarise-at}
+DF %>% 
+  group_by(Species) %>% 
+  summarise_at(vars(contains('Width')), mean)
+
+DT %>%
+  start_expr() %>% 
+  group_by(Species) %>% 
+  transmute_sd(.SDcols = contains('Width'), mean) %>%
+  end_expr(.by_ref = FALSE) %>% {
+    invisible(print(.))
+  }
+```
+
+### `summarise_all`
+
+Note that `transmute_sd`, by default, chooses all the non-grouping columns to apply the aggregation; hence, both examples 1 and 2 below give the same results.
+
+```{r summarise-all}
+DF %>% 
+  group_by(Species) %>% 
+  summarise_all(mean)
+
+# example 1: .SDcols argument defaults to tidyselect::everything()
+DT %>%
+  start_expr() %>% 
+  group_by(Species) %>% 
+  transmute_sd(, mean) %>%
+  end_expr(.by_ref = FALSE) %>% {
+    invisible(print(.))
+  }
+
+# example 2: explictly declaring .SDcols
+DT %>%
+  start_expr() %>% 
+  group_by(Species) %>% 
+  transmute_sd(.SDcols = everything(), mean) %>%
+  end_expr(.by_ref = FALSE) %>% {
+    invisible(print(.))
+  }
+```
+
+### Applying Multiple Functions in `summarise`
+
+Note that while column names have to explicitly declared with `summarise_all`, `table.express` automatically renames the resulting columns based on the function calls.
+
+`dplyr` `summarise_*`, however, allow custom naming of aggregated columns, and it's currently under development in `table.express` [Github Issue #12](https://github.com/asardaes/table.express/issues/12){target="blank"}
+
+*Tip*: `data.table` syntax allows `list()` to be substituted with `.()`; hence both examples 1 and 2 below give the same results.
+
+```{r summarise-multi}
+DF %>% 
+  group_by(Species) %>% 
+  summarise_all(list(mean = mean,
+                     min = min,
+                     max = max))
+
+# Example 1: functions declared with list()
+DT %>%
+  start_expr() %>% 
+  group_by(Species) %>% 
+  transmute_sd(, list(mean, min, max), ) %>%
+  end_expr(.by_ref = FALSE) %>% {
+    invisible(print(.))
+  }
+
+# Example 1: functions declared with .()
+DT %>%
+  start_expr() %>% 
+  group_by(Species) %>% 
+  transmute_sd(, .(mean, min, max), ) %>%
+  end_expr(.by_ref = FALSE) %>% {
+    invisible(print(.))
+  }
+```
